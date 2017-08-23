@@ -70,8 +70,11 @@ class ActivityPub::TagManager
   end
 
   def local_uri?(uri)
-    host = Addressable::URI.parse(uri).normalized_host
-    ::TagManager.instance.local_domain?(host) || ::TagManager.instance.web_domain?(host)
+    uri  = Addressable::URI.parse(uri)
+    host = uri.normalized_host
+    host = "#{host}:#{uri.port}" if uri.port
+
+    !host.nil? && (::TagManager.instance.local_domain?(host) || ::TagManager.instance.web_domain?(host))
   end
 
   def uri_to_local_id(uri, param = :id)
@@ -87,8 +90,10 @@ class ActivityPub::TagManager
       else
         klass.find_by(id: uri_to_local_id(uri))
       end
+    elsif ::TagManager.instance.local_id?(uri)
+      klass.find_by(id: ::TagManager.instance.unique_tag_to_local_id(uri, klass.to_s))
     else
-      klass.find_by(uri: uri)
+      klass.find_by(uri: uri.split('#').first)
     end
   end
 end
