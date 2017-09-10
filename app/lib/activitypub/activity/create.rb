@@ -17,6 +17,7 @@ class ActivityPub::Activity::Create < ActivityPub::Activity
 
     resolve_thread(status)
     distribute(status)
+    forward_for_reply if status.public_visibility? || status.unlisted_visibility?
 
     status
   end
@@ -24,15 +25,15 @@ class ActivityPub::Activity::Create < ActivityPub::Activity
   private
 
   def find_existing_status
-    status   = Status.find_by(uri: object_uri)
-    status ||= Status.find_by(uri: @object['_:atomUri']) if @object['_:atomUri'].present?
+    status   = status_from_uri(object_uri)
+    status ||= Status.find_by(uri: @object['atomUri']) if @object['atomUri'].present?
     status
   end
 
   def status_params
     {
       uri: @object['id'],
-      url: @object['url'] || @object['id'],
+      url: object_url || @object['id'],
       account: @account,
       text: text_from_content || '',
       language: language_from_content,
@@ -42,7 +43,7 @@ class ActivityPub::Activity::Create < ActivityPub::Activity
       sensitive: @object['sensitive'] || false,
       visibility: visibility_from_audience,
       thread: replied_to_status,
-      conversation: conversation_from_uri(@object['_:conversation']),
+      conversation: conversation_from_uri(@object['conversation']),
     }
   end
 
@@ -91,7 +92,7 @@ class ActivityPub::Activity::Create < ActivityPub::Activity
 
   def resolve_thread(status)
     return unless status.reply? && status.thread.nil?
-    ThreadResolveWorker.perform_async(status.id, @object['inReplyTo'])
+    ThreadResolveWorker.perform_async(status.id, in_reply_to_uri)
   end
 
   def conversation_from_uri(uri)
@@ -118,8 +119,19 @@ class ActivityPub::Activity::Create < ActivityPub::Activity
   end
 
   def replied_to_status
-    return if @object['inReplyTo'].blank?
-    @replied_to_status ||= status_from_uri(@object['inReplyTo'])
+    return @replied_to_status if defined?(@replied_to_status)
+
+    if in_reply_to_uri.blank?
+      @replied_to_status = nil
+    else
+      @replied_to_status   = status_from_uri(in_reply_to_uri)
+      @replied_to_status ||= status_from_uri(@object['inReplyToAtomUri']) if @object['inReplyToAtomUri'].present?
+      @replied_to_status
+    end
+  end
+
+  def in_reply_to_uri
+    value_or_id(@object['inReplyTo'])
   end
 
   def text_from_content
@@ -133,6 +145,16 @@ class ActivityPub::Activity::Create < ActivityPub::Activity
   def language_from_content
     return nil unless language_map?
     @object['contentMap'].keys.first
+  end
+
+  def object_url
+    return if @object['url'].blank?
+
+    value = first_of_value(@object['url'])
+
+    return value if value.is_a?(String)
+
+    value['href']
   end
 
   def language_map?
@@ -150,5 +172,14 @@ class ActivityPub::Activity::Create < ActivityPub::Activity
   def skip_download?
     return @skip_download if defined?(@skip_download)
     @skip_download ||= DomainBlock.find_by(domain: @account.domain)&.reject_media?
+  end
+
+  def reply_to_local?
+    !replied_to_status.nil? && replied_to_status.account.local?
+  end
+
+  def forward_for_reply
+    return unless @json['signature'].present? && reply_to_local?
+    ActivityPub::RawDistributionWorker.perform_async(Oj.dump(@json), replied_to_status.account_id)
   end
 end
