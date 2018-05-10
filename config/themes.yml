@@ -1,2 +1,3 @@
 default: styles/application.scss
 black: styles/black.scss
+contrast: styles/contrast.scss
