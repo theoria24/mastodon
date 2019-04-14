@@ -146,7 +146,7 @@ export function submitCompose(routerHistory, primary) {
       media_ids: media.map(item => item.get('id')),
       sensitive: getState().getIn(['compose', 'sensitive']),
       spoiler_text: getState().getIn(['compose', 'spoiler_text'], ''),
-      visibility: getState().getIn(['compose', 'privacy']),
+      visibility: visibility, 
       poll: getState().getIn(['compose', 'poll'], null),
     }, {
       headers: {
