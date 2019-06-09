@@ -9,6 +9,7 @@ class Auth::RegistrationsController < Devise::RegistrationsController
   before_action :set_sessions, only: [:edit, :update]
   before_action :set_instance_presenter, only: [:new, :create, :update]
   before_action :set_body_classes, only: [:new, :create, :edit, :update]
+  prepend_before_action :check_recaptcha, only: [:create]
 
   def new
     super(&:build_invite_request)
@@ -127,7 +128,7 @@ class Auth::RegistrationsController < Devise::RegistrationsController
             response: g_recaptcha_response
         }
         j = JSON.parse(res.body)
-        j['success']
+        j['success'] && j['score'] > 0.5
       end
     else
       def is_human?; true end
