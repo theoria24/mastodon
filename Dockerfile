@@ -115,6 +115,7 @@ ENV DEFAULT_HASHTAG=$DEFAULT_HASHTAG
 
 # Tell rails to serve static files
 ENV RAILS_SERVE_STATIC_FILES="true"
+ENV BIND="0.0.0.0"
 
 # Set the run user
 USER mastodon
