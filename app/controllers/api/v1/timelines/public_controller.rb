@@ -40,9 +40,9 @@ class Api::V1::Timelines::PublicController < Api::BaseController
 
   def public_timeline_statuses
     if truthy_param?(:local)
-      Status.as_tag_timeline(Rails.configuration.x.default_hashtag_id, current_account, false)
+      Status.as_tag_timeline(Rails.configuration.x.default_hashtag_id, current_account, truthy_param?(:remote) ? :remote : truthy_param?(:local))
     else
-      Status.as_public_timeline(current_account, false)
+      Status.as_public_timeline(current_account, truthy_param?(:remote) ? :remote : truthy_param?(:local))
     end
   end
 
@@ -51,7 +51,7 @@ class Api::V1::Timelines::PublicController < Api::BaseController
   end
 
   def pagination_params(core_params)
-    params.slice(:local, :limit, :only_media).permit(:local, :limit, :only_media).merge(core_params)
+    params.slice(:local, :remote, :limit, :only_media).permit(:local, :remote, :limit, :only_media).merge(core_params)
   end
 
   def next_path
