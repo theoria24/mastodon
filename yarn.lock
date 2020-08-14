@@ -1130,10 +1130,10 @@
   resolved "https://registry.yarnpkg.com/@bcoe/v8-coverage/-/v8-coverage-0.2.3.tgz#75a2e8b51cb758a7553d6804a5932d7aace75c39"
   integrity sha512-0hYQ8SB4Db5zvZB4axdMHGwEaQjkZzFjQiN9LVYvIFB2nSUHW9tYpxWriPrWDASIxiaXax83REcLxuSdnGPZtw==
 
-"@clusterws/cws@^2.0.0":
-  version "2.0.0"
-  resolved "https://registry.yarnpkg.com/@clusterws/cws/-/cws-2.0.0.tgz#73e6ee97b2dcb561d294caa47d48a195234e18a9"
-  integrity sha512-ZKG2vR0XJyyaXEvcV8cxzuspYnEl4owyqkdcMcHd/Pza9nAKQ5iH+yrEg1JsScg/zBIqTZ9D/3rWJavVwTy0mw==
+"@clusterws/cws@^3.0.0":
+  version "3.0.0"
+  resolved "https://registry.yarnpkg.com/@clusterws/cws/-/cws-3.0.0.tgz#518fc8e7d9066e220f6f6aef3158cc14d5a1e98e"
+  integrity sha512-6RO7IUbSlTO3l8XPN/9g21YGPF4HjfkidDzchkP0h6iwq5jYtji+KUCgyxcSYiuN7aWu8nGJDjBer7XJilPnOg==
 
 "@cnakazawa/watch@^1.0.3":
   version "1.0.4"
@@ -9195,10 +9195,6 @@ regenerate@^1.4.0:
   version "1.4.1"
   resolved "https://registry.yarnpkg.com/regenerate/-/regenerate-1.4.1.tgz#cad92ad8e6b591773485fbe05a485caf4f457e6f"
   integrity sha512-j2+C8+NtXQgEKWk49MMP5P/u2GhnahTtVkRIHr5R5lVRlbKvmQ+oS+A5aLKWp2ma5VkT8sh6v+v4hbH0YHR66A==
-
-regenerator-runtime@^0.10.5:
-  version "0.10.5"
-  resolved "https://registry.yarnpkg.com/regenerator-runtime/-/regenerator-runtime-0.10.5.tgz#336c3efc1220adcedda2c9fab67b5a7955a33658"
 
 regenerator-runtime@^0.11.0:
   version "0.11.1"
