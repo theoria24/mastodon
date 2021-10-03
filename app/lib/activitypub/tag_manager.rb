@@ -12,6 +12,10 @@ class ActivityPub::TagManager
     public: 'https://www.w3.org/ns/activitystreams#Public',
   }.freeze
 
+  def public_collection?(uri)
+    uri == COLLECTIONS[:public] || uri == 'as:Public' || uri == 'Public'
+  end
+
   def url_for(target)
     return target.url if target.respond_to?(:local?) && !target.local?
 
@@ -38,6 +42,10 @@ class ActivityPub::TagManager
     when :emoji
       emoji_url(target)
     end
+  end
+
+  def uri_for_username(username)
+    account_url(username: username)
   end
 
   def generate_uri_for(_target)

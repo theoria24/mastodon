@@ -10,6 +10,7 @@ RSpec.describe ActivityPub::OutboxesController, type: :controller do
     end
 
     it 'does not set sessions' do
+      response
       expect(session).to be_empty
     end
 
@@ -34,9 +35,8 @@ RSpec.describe ActivityPub::OutboxesController, type: :controller do
     context 'without signature' do
       let(:remote_account) { nil }
 
-      before do
-        get :show, params: { account_username: account.username, page: page }
-      end
+      subject(:response) { get :show, params: { account_username: account.username, page: page } }
+      subject(:body) { body_as_json }
 
       context 'with page not requested' do
         let(:page) { nil }
@@ -46,15 +46,35 @@ RSpec.describe ActivityPub::OutboxesController, type: :controller do
         end
 
         it 'returns application/activity+json' do
-          expect(response.content_type).to eq 'application/activity+json'
+          expect(response.media_type).to eq 'application/activity+json'
         end
 
         it 'returns totalItems' do
-          json = body_as_json
-          expect(json[:totalItems]).to eq 4
+          expect(body[:totalItems]).to eq 4
         end
 
         it_behaves_like 'cachable response'
+
+        context 'when account is permanently suspended' do
+          before do
+            account.suspend!
+            account.deletion_request.destroy
+          end
+
+          it 'returns http gone' do
+            expect(response).to have_http_status(410)
+          end
+        end
+
+        context 'when account is temporarily suspended' do
+          before do
+            account.suspend!
+          end
+
+          it 'returns http forbidden' do
+            expect(response).to have_http_status(403)
+          end
+        end
       end
 
       context 'with page requested' do
@@ -65,17 +85,37 @@ RSpec.describe ActivityPub::OutboxesController, type: :controller do
         end
 
         it 'returns application/activity+json' do
-          expect(response.content_type).to eq 'application/activity+json'
+          expect(response.media_type).to eq 'application/activity+json'
         end
 
         it 'returns orderedItems with public or unlisted statuses' do
-          json = body_as_json
-          expect(json[:orderedItems]).to be_an Array
-          expect(json[:orderedItems].size).to eq 2
-          expect(json[:orderedItems].all? { |item| item[:to].include?(ActivityPub::TagManager::COLLECTIONS[:public]) || item[:cc].include?(ActivityPub::TagManager::COLLECTIONS[:public]) }).to be true
+          expect(body[:orderedItems]).to be_an Array
+          expect(body[:orderedItems].size).to eq 2
+          expect(body[:orderedItems].all? { |item| item[:to].include?(ActivityPub::TagManager::COLLECTIONS[:public]) || item[:cc].include?(ActivityPub::TagManager::COLLECTIONS[:public]) }).to be true
         end
 
         it_behaves_like 'cachable response'
+
+        context 'when account is permanently suspended' do
+          before do
+            account.suspend!
+            account.deletion_request.destroy
+          end
+
+          it 'returns http gone' do
+            expect(response).to have_http_status(410)
+          end
+        end
+
+        context 'when account is temporarily suspended' do
+          before do
+            account.suspend!
+          end
+
+          it 'returns http forbidden' do
+            expect(response).to have_http_status(403)
+          end
+        end
       end
     end
 
@@ -93,7 +133,7 @@ RSpec.describe ActivityPub::OutboxesController, type: :controller do
         end
 
         it 'returns application/activity+json' do
-          expect(response.content_type).to eq 'application/activity+json'
+          expect(response.media_type).to eq 'application/activity+json'
         end
 
         it 'returns orderedItems with public or unlisted statuses' do
@@ -119,7 +159,7 @@ RSpec.describe ActivityPub::OutboxesController, type: :controller do
         end
 
         it 'returns application/activity+json' do
-          expect(response.content_type).to eq 'application/activity+json'
+          expect(response.media_type).to eq 'application/activity+json'
         end
 
         it 'returns orderedItems with private statuses' do
@@ -145,7 +185,7 @@ RSpec.describe ActivityPub::OutboxesController, type: :controller do
         end
 
         it 'returns application/activity+json' do
-          expect(response.content_type).to eq 'application/activity+json'
+          expect(response.media_type).to eq 'application/activity+json'
         end
 
         it 'returns empty orderedItems' do
@@ -170,7 +210,7 @@ RSpec.describe ActivityPub::OutboxesController, type: :controller do
         end
 
         it 'returns application/activity+json' do
-          expect(response.content_type).to eq 'application/activity+json'
+          expect(response.media_type).to eq 'application/activity+json'
         end
 
         it 'returns empty orderedItems' do

@@ -15,7 +15,7 @@ class ActivityPub::Activity::Create < ActivityPub::Activity
   private
 
   def create_encrypted_message
-    return reject_payload! if invalid_origin?(@object['id']) || @options[:delivered_to_account_id].blank?
+    return reject_payload! if invalid_origin?(object_uri) || @options[:delivered_to_account_id].blank?
 
     target_account = Account.find(@options[:delivered_to_account_id])
     target_device  = target_account.devices.find_by(device_id: @object.dig('to', 'deviceId'))
@@ -43,21 +43,17 @@ class ActivityPub::Activity::Create < ActivityPub::Activity
   end
 
   def create_status
-    return reject_payload! if unsupported_object_type? || invalid_origin?(@object['id']) || Tombstone.exists?(uri: @object['id']) || !related_to_local_activity?
+    return reject_payload! if unsupported_object_type? || invalid_origin?(object_uri) || tombstone_exists? || !related_to_local_activity?
 
-    RedisLock.acquire(lock_options) do |lock|
-      if lock.acquired?
-        return if delete_arrived_first?(object_uri) || poll_vote? # rubocop:disable Lint/NonLocalExitFromIterator
+    lock_or_fail("create:#{object_uri}") do
+      return if delete_arrived_first?(object_uri) || poll_vote?
 
-        @status = find_existing_status
+      @status = find_existing_status
 
-        if @status.nil?
-          process_status
-        elsif @options[:delivered_to_account_id].present?
-          postprocess_audience_and_deliver
-        end
-      else
-        raise Mastodon::RaceConditionError
+      if @status.nil?
+        process_status
+      elsif @options[:delivered_to_account_id].present?
+        postprocess_audience_and_deliver
       end
     end
 
@@ -88,9 +84,8 @@ class ActivityPub::Activity::Create < ActivityPub::Activity
 
     resolve_thread(@status)
     fetch_replies(@status)
-    check_for_spam
     distribute(@status)
-    forward_for_reply if @status.distributable?
+    forward_for_reply
   end
 
   def find_existing_status
@@ -102,8 +97,8 @@ class ActivityPub::Activity::Create < ActivityPub::Activity
   def process_status_params
     @params = begin
       {
-        uri: @object['id'],
-        url: object_url || @object['id'],
+        uri: object_uri,
+        url: object_url || object_uri,
         account: @account,
         text: text_from_content || '',
         language: detected_language,
@@ -111,7 +106,7 @@ class ActivityPub::Activity::Create < ActivityPub::Activity
         created_at: @object['published'],
         override_timestamps: @options[:override_timestamps],
         reply: @object['inReplyTo'].present?,
-        sensitive: @object['sensitive'] || false,
+        sensitive: @account.sensitized? || @object['sensitive'] || false,
         visibility: visibility_from_audience,
         thread: replied_to_status,
         conversation: conversation_from_uri(@object['conversation']),
@@ -123,7 +118,7 @@ class ActivityPub::Activity::Create < ActivityPub::Activity
 
   def process_audience
     (audience_to + audience_cc).uniq.each do |audience|
-      next if audience == ActivityPub::TagManager::COLLECTIONS[:public]
+      next if ActivityPub::TagManager.instance.public_collection?(audience)
 
       # Unlike with tags, there is no point in resolving accounts we don't already
       # know here, because silent mentions would only be used for local access
@@ -169,7 +164,7 @@ class ActivityPub::Activity::Create < ActivityPub::Activity
   def attach_tags(status)
     @tags.each do |tag|
       status.tags << tag
-      TrendingTags.record_use!(tag, status.account, status.created_at) if status.public_visibility?
+      tag.use!(@account, status: status, at_time: status.created_at) if status.public_visibility?
     end
 
     @mentions.each do |mention|
@@ -228,6 +223,8 @@ class ActivityPub::Activity::Create < ActivityPub::Activity
     emoji ||= CustomEmoji.new(domain: @account.domain, shortcode: shortcode, uri: uri)
     emoji.image_remote_url = image_url
     emoji.save
+  rescue Seahorse::Client::NetworkingError
+    nil
   end
 
   def process_attachments
@@ -250,6 +247,8 @@ class ActivityPub::Activity::Create < ActivityPub::Activity
         media_attachment.save
       rescue Mastodon::UnexpectedResponseError, HTTP::TimeoutError, HTTP::ConnectionError, OpenSSL::SSL::SSLError
         RedownloadMediaWorker.perform_in(rand(30..600).seconds, media_attachment.id)
+      rescue Seahorse::Client::NetworkingError
+        nil
       end
     end
 
@@ -310,13 +309,9 @@ class ActivityPub::Activity::Create < ActivityPub::Activity
     poll = replied_to_status.preloadable_poll
     already_voted = true
 
-    RedisLock.acquire(poll_lock_options) do |lock|
-      if lock.acquired?
-        already_voted = poll.votes.where(account: @account).exists?
-        poll.votes.create!(account: @account, choice: poll.options.index(@object['name']), uri: @object['id'])
-      else
-        raise Mastodon::RaceConditionError
-      end
+    lock_or_fail("vote:#{replied_to_status.poll_id}:#{@account.id}") do
+      already_voted = poll.votes.where(account: @account).exists?
+      poll.votes.create!(account: @account, choice: poll.options.index(@object['name']), uri: object_uri)
     end
 
     increment_voters_count! unless already_voted
@@ -352,9 +347,9 @@ class ActivityPub::Activity::Create < ActivityPub::Activity
   end
 
   def visibility_from_audience
-    if audience_to.include?(ActivityPub::TagManager::COLLECTIONS[:public])
+    if audience_to.any? { |to| ActivityPub::TagManager.instance.public_collection?(to) }
       :public
-    elsif audience_cc.include?(ActivityPub::TagManager::COLLECTIONS[:public])
+    elsif audience_cc.any? { |cc| ActivityPub::TagManager.instance.public_collection?(cc) }
       :unlisted
     elsif audience_to.include?(@account.followers_url)
       :private
@@ -385,7 +380,7 @@ class ActivityPub::Activity::Create < ActivityPub::Activity
   end
 
   def text_from_content
-    return Formatter.instance.linkify([[text_from_name, text_from_summary.presence].compact.join("\n\n"), object_url || @object['id']].join(' ')) if converted_object_type?
+    return Formatter.instance.linkify([[text_from_name, text_from_summary.presence].compact.join("\n\n"), object_url || object_uri].join(' ')) if converted_object_type?
 
     if @object['content'].present?
       @object['content']
@@ -484,12 +479,12 @@ class ActivityPub::Activity::Create < ActivityPub::Activity
     Account.local.where(username: local_usernames).exists?
   end
 
-  def check_for_spam
-    SpamCheck.perform(@status)
+  def tombstone_exists?
+    Tombstone.exists?(uri: object_uri)
   end
 
   def forward_for_reply
-    return unless @json['signature'].present? && reply_to_local?
+    return unless @status.distributable? && @json['signature'].present? && reply_to_local?
 
     ActivityPub::RawDistributionWorker.perform_async(Oj.dump(@json), replied_to_status.account_id, [@account.preferred_inbox_url])
   end
@@ -504,13 +499,5 @@ class ActivityPub::Activity::Create < ActivityPub::Activity
   rescue ActiveRecord::StaleObjectError
     poll.reload
     retry
-  end
-
-  def lock_options
-    { redis: Redis.current, key: "create:#{@object['id']}" }
-  end
-
-  def poll_lock_options
-    { redis: Redis.current, key: "vote:#{replied_to_status.poll_id}:#{@account.id}" }
   end
 end

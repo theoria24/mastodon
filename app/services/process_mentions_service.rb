@@ -43,7 +43,6 @@ class ProcessMentionsService < BaseService
     end
 
     status.save!
-    check_for_spam(status)
 
     mentions.each { |mention| create_notification(mention) }
   end
@@ -58,9 +57,9 @@ class ProcessMentionsService < BaseService
     mentioned_account = mention.account
 
     if mentioned_account.local?
-      LocalNotificationWorker.perform_async(mentioned_account.id, mention.id, mention.class.name)
+      LocalNotificationWorker.perform_async(mentioned_account.id, mention.id, mention.class.name, :mention)
     elsif mentioned_account.activitypub?
-      ActivityPub::DeliveryWorker.perform_async(activitypub_json, mention.status.account_id, mentioned_account.inbox_url)
+      ActivityPub::DeliveryWorker.perform_async(activitypub_json, mention.status.account_id, mentioned_account.inbox_url, { synchronize_followers: !mention.status.distributable? })
     end
   end
 
@@ -71,9 +70,5 @@ class ProcessMentionsService < BaseService
 
   def resolve_account_service
     ResolveAccountService.new
-  end
-
-  def check_for_spam(status)
-    SpamCheck.perform(status)
   end
 end

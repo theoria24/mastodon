@@ -29,8 +29,7 @@ class AccountsController < ApplicationController
         end
 
         @pinned_statuses = cache_collection(@account.pinned_statuses, Status) if show_pinned_statuses?
-        @statuses        = filtered_status_page
-        @statuses        = cache_collection(@statuses, Status)
+        @statuses        = cached_filtered_status_page
         @rss_url         = rss_url
 
         unless @statuses.empty?
@@ -78,11 +77,7 @@ class AccountsController < ApplicationController
   end
 
   def only_media_scope
-    Status.where(id: account_media_status_ids)
-  end
-
-  def account_media_status_ids
-    @account.media_attachments.attached.reorder(nil).select(:status_id).distinct
+    Status.joins(:media_attachments).merge(@account.media_attachments.reorder(nil)).group(:id)
   end
 
   def no_replies_scope
@@ -101,6 +96,10 @@ class AccountsController < ApplicationController
 
   def username_param
     params[:username]
+  end
+
+  def skip_temporary_suspension_response?
+    request.format == :json
   end
 
   def rss_url
@@ -132,19 +131,24 @@ class AccountsController < ApplicationController
   end
 
   def media_requested?
-    request.path.split('.').first.ends_with?('/media') && !tag_requested?
+    request.path.split('.').first.end_with?('/media') && !tag_requested?
   end
 
   def replies_requested?
-    request.path.split('.').first.ends_with?('/with_replies') && !tag_requested?
+    request.path.split('.').first.end_with?('/with_replies') && !tag_requested?
   end
 
   def tag_requested?
-    request.path.split('.').first.ends_with?(Addressable::URI.parse("/tagged/#{params[:tag]}").normalize)
+    request.path.split('.').first.end_with?(Addressable::URI.parse("/tagged/#{params[:tag]}").normalize)
   end
 
-  def filtered_status_page
-    filtered_statuses.paginate_by_id(PAGE_SIZE, params_slice(:max_id, :min_id, :since_id))
+  def cached_filtered_status_page
+    cache_collection_paginated_by_id(
+      filtered_statuses,
+      Status,
+      PAGE_SIZE,
+      params_slice(:max_id, :min_id, :since_id)
+    )
   end
 
   def params_slice(*keys)

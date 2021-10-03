@@ -3,14 +3,12 @@
 require 'sidekiq_unique_jobs/web'
 require 'sidekiq-scheduler/web'
 
-Sidekiq::Web.set :session_secret, Rails.application.secrets[:secret_key_base]
-
 Rails.application.routes.draw do
   root 'home#index'
 
   mount LetterOpenerWeb::Engine, at: 'letter_opener' if Rails.env.development?
 
-  health_check_routes
+  get 'health', to: 'health#show'
 
   authenticate :user, lambda { |u| u.admin? } do
     mount Sidekiq::Web, at: 'sidekiq', as: :sidekiq
@@ -37,6 +35,7 @@ Rails.application.routes.draw do
 
   resource :instance_actor, path: 'actor', only: [:show] do
     resource :inbox, only: [:create], module: :activitypub
+    resource :outbox, only: [:show], module: :activitypub
   end
 
   devise_scope :user do
@@ -45,6 +44,7 @@ Rails.application.routes.draw do
     namespace :auth do
       resource :setup, only: [:show, :update], controller: :setup
       resource :challenge, only: [:create], controller: :challenges
+      get 'sessions/security_key_options', to: 'sessions#webauthn_options'
     end
   end
 
@@ -81,6 +81,7 @@ Rails.application.routes.draw do
     resource :inbox, only: [:create], module: :activitypub
     resource :claim, only: [:create], module: :activitypub
     resources :collections, only: [:show], module: :activitypub
+    resource :followers_synchronization, only: [:show], module: :activitypub
   end
 
   resource :inbox, only: [:create], module: :activitypub
@@ -96,8 +97,6 @@ Rails.application.routes.draw do
   post '/interact/:id', to: 'remote_interaction#create'
 
   get '/explore', to: 'directories#index', as: :explore
-  get '/explore/:id', to: 'directories#show', as: :explore_hashtag
-
   get '/settings', to: redirect('/settings/profile')
 
   namespace :settings do
@@ -122,9 +121,25 @@ Rails.application.routes.draw do
       resources :mutes, only: :index, controller: :muted_accounts
       resources :lists, only: :index, controller: :lists
       resources :domain_blocks, only: :index, controller: :blocked_domains
+      resources :bookmarks, only: :index, controller: :bookmarks
     end
 
-    resource :two_factor_authentication, only: [:show, :create, :destroy]
+    resources :two_factor_authentication_methods, only: [:index] do
+      collection do
+        post :disable
+      end
+    end
+
+    resource :otp_authentication, only: [:show, :create], controller: 'two_factor_authentication/otp_authentication'
+
+    resources :webauthn_credentials, only: [:index, :new, :create, :destroy],
+              path: 'security_keys',
+              controller: 'two_factor_authentication/webauthn_credentials' do
+
+      collection do
+        get :options
+      end
+    end
 
     namespace :two_factor_authentication do
       resources :recovery_codes, only: [:create]
@@ -171,11 +186,7 @@ Rails.application.routes.draw do
     get '/dashboard', to: 'dashboard#index'
 
     resources :domain_allows, only: [:new, :create, :show, :destroy]
-    resources :domain_blocks, only: [:new, :create, :show, :destroy, :update] do
-      member do
-        get :edit
-      end
-    end
+    resources :domain_blocks, only: [:new, :create, :show, :destroy, :update, :edit]
 
     resources :email_domain_blocks, only: [:index, :new, :create, :destroy]
     resources :action_logs, only: [:index]
@@ -204,7 +215,15 @@ Rails.application.routes.draw do
       end
     end
 
-    resources :instances, only: [:index, :show], constraints: { id: /[^\/]+/ }
+    resources :instances, only: [:index, :show], constraints: { id: /[^\/]+/ } do
+      member do
+        post :clear_delivery_errors
+        post :restart_delivery
+        post :stop_delivery
+      end
+    end
+  
+    resources :rules
 
     resources :reports, only: [:index, :show] do
       member do
@@ -219,9 +238,10 @@ Rails.application.routes.draw do
 
     resources :report_notes, only: [:create, :destroy]
 
-    resources :accounts, only: [:index, :show] do
+    resources :accounts, only: [:index, :show, :destroy] do
       member do
         post :enable
+        post :unsensitive
         post :unsilence
         post :unsuspend
         post :redownload
@@ -270,7 +290,14 @@ Rails.application.routes.draw do
       end
     end
 
+    resources :ip_blocks, only: [:index, :new, :create] do
+      collection do
+        post :batch
+      end
+    end
+
     resources :account_moderation_notes, only: [:create, :destroy]
+    resource :follow_recommendations, only: [:show, :update]
 
     resources :tags, only: [:index, :show, :update] do
       collection do
@@ -380,9 +407,14 @@ Rails.application.routes.draw do
 
       resources :apps, only: [:create]
 
+      namespace :emails do
+        resources :confirmations, only: [:create]
+      end
+
       resource :instance, only: [:show] do
         resources :peers, only: [:index], controller: 'instances/peers'
         resource :activity, only: [:show], controller: 'instances/activity'
+        resources :rules, only: [:index], controller: 'instances/rules'
       end
 
       resource :domain_blocks, only: [:show, :create, :destroy]
@@ -409,6 +441,7 @@ Rails.application.routes.draw do
         get :verify_credentials, to: 'credentials#show'
         patch :update_credentials, to: 'credentials#update'
         resource :search, only: :show, controller: :search
+        resource :lookup, only: :show, controller: :lookup
         resources :relationships, only: :index
       end
 
@@ -418,6 +451,7 @@ Rails.application.routes.draw do
         resources :following, only: :index, controller: 'accounts/following_accounts'
         resources :lists, only: :index, controller: 'accounts/lists'
         resources :identity_proofs, only: :index, controller: 'accounts/identity_proofs'
+        resources :featured_tags, only: :index, controller: 'accounts/featured_tags'
 
         member do
           post :follow
@@ -452,9 +486,10 @@ Rails.application.routes.draw do
       end
 
       namespace :admin do
-        resources :accounts, only: [:index, :show] do
+        resources :accounts, only: [:index, :show, :destroy] do
           member do
             post :enable
+            post :unsensitive
             post :unsilence
             post :unsuspend
             post :approve
@@ -478,6 +513,7 @@ Rails.application.routes.draw do
     namespace :v2 do
       resources :media, only: [:create]
       get '/search', to: 'search#index', as: :search
+      resources :suggestions, only: [:index]
     end
 
     namespace :web do
