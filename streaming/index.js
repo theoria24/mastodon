@@ -92,18 +92,31 @@ const redisUrlToClient = async (defaultConfig, redisUrl) => {
 const numWorkers = +process.env.STREAMING_CLUSTER_NUM || (env === 'development' ? 1 : Math.max(os.cpus().length - 1, 1));
 
 /**
+ * Attempts to safely parse a string as JSON, used when both receiving a message
+ * from redis and when receiving a message from a client over a websocket
+ * connection, this is why it accepts a `req` argument.
  * @param {string} json
- * @param {any} req
- * @return {Object.<string, any>|null}
+ * @param {any?} req
+ * @returns {Object.<string, any>|null}
  */
 const parseJSON = (json, req) => {
   try {
     return JSON.parse(json);
   } catch (err) {
-    if (req.accountId) {
-      log.warn(req.requestId, `Error parsing message from user ${req.accountId}: ${err}`);
+    /* FIXME: This logging isn't great, and should probably be done at the
+     * call-site of parseJSON, not in the method, but this would require changing
+     * the signature of parseJSON to return something akin to a Result type:
+     * [Error|null, null|Object<string,any}], and then handling the error
+     * scenarios.
+     */
+    if (req) {
+      if (req.accountId) {
+        log.warn(req.requestId, `Error parsing message from user ${req.accountId}: ${err}`);
+      } else {
+        log.silly(req.requestId, `Error parsing message from ${req.remoteAddress}: ${err}`);
+      }
     } else {
-      log.silly(req.requestId, `Error parsing message from ${req.remoteAddress}: ${err}`);
+      log.warn(`Error parsing message from redis: ${err}`);
     }
     return null;
   }
@@ -127,7 +140,6 @@ const startWorker = async (workerId) => {
       database: process.env.DB_NAME || 'mastodon_development',
       host:     process.env.DB_HOST || pg.defaults.host,
       port:     process.env.DB_PORT || pg.defaults.port,
-      max:      10,
     },
 
     production: {
@@ -136,20 +148,19 @@ const startWorker = async (workerId) => {
       database: process.env.DB_NAME || 'mastodon_production',
       host:     process.env.DB_HOST || 'localhost',
       port:     process.env.DB_PORT || 5432,
-      max:      10,
     },
   };
-
-  if (!!process.env.DB_SSLMODE && process.env.DB_SSLMODE !== 'disable') {
-    pgConfigs.development.ssl = true;
-    pgConfigs.production.ssl = true;
-  }
 
   const app = express();
 
   app.set('trust proxy', process.env.TRUSTED_PROXY_IP ? process.env.TRUSTED_PROXY_IP.split(/(?:\s*,\s*|\s+)/) : 'loopback,uniquelocal');
 
-  const pgPool = new pg.Pool(Object.assign(pgConfigs[env], dbUrlToConfig(process.env.DATABASE_URL)));
+  const pgPool = new pg.Pool(Object.assign(pgConfigs[env], dbUrlToConfig(process.env.DATABASE_URL), {
+    max: process.env.DB_POOL || 10,
+    connectionTimeoutMillis: 15000,
+    ssl: !!process.env.DB_SSLMODE && process.env.DB_SSLMODE !== 'disable',
+  }));
+
   const server = http.createServer(app);
   const redisNamespace = process.env.REDIS_NAMESPACE || null;
 
@@ -169,7 +180,7 @@ const startWorker = async (workerId) => {
   const redisPrefix = redisNamespace ? `${redisNamespace}:` : '';
 
   /**
-   * @type {Object.<string, Array.<function(string): void>>}
+   * @type {Object.<string, Array.<function(Object<string, any>): void>>}
    */
   const subs = {};
 
@@ -209,7 +220,10 @@ const startWorker = async (workerId) => {
       return;
     }
 
-    callbacks.forEach(callback => callback(message));
+    const json = parseJSON(message, null);
+    if (!json) return;
+
+    callbacks.forEach(callback => callback(json));
   };
 
   /**
@@ -231,6 +245,7 @@ const startWorker = async (workerId) => {
 
   /**
    * @param {string} channel
+   * @param {function(Object<string, any>): void} callback
    */
   const unsubscribe = (channel, callback) => {
     log.silly(`Removing listener for ${channel}`);
@@ -380,7 +395,7 @@ const startWorker = async (workerId) => {
 
   /**
    * @param {any} req
-   * @return {string}
+   * @returns {string|undefined}
    */
   const channelNameFromPath = req => {
     const { path, query } = req;
@@ -489,15 +504,11 @@ const startWorker = async (workerId) => {
   /**
    * @param {any} req
    * @param {SystemMessageHandlers} eventHandlers
-   * @return {function(string): void}
+   * @returns {function(object): void}
    */
   const createSystemMessageListener = (req, eventHandlers) => {
     return message => {
-      const json = parseJSON(message, req);
-
-      if (!json) return;
-
-      const { event } = json;
+      const { event } = message;
 
       log.silly(req.requestId, `System message for ${req.accountId}: ${event}`);
 
@@ -614,19 +625,16 @@ const startWorker = async (workerId) => {
    * @param {function(string, string): void} output
    * @param {function(string[], function(string): void): void} attachCloseHandler
    * @param {boolean=} needsFiltering
-   * @return {function(string): void}
+   * @returns {function(object): void}
    */
   const streamFrom = (ids, req, output, attachCloseHandler, needsFiltering = false) => {
     const accountId = req.accountId || req.remoteAddress;
 
     log.verbose(req.requestId, `Starting stream from ${ids.join(', ')} for ${accountId}`);
 
+    // Currently message is of type string, soon it'll be Record<string, any>
     const listener = message => {
-      const json = parseJSON(message, req);
-
-      if (!json) return;
-
-      const { event, payload, queued_at } = json;
+      const { event, payload, queued_at } = message;
 
       const transmit = () => {
         const now = new Date().getTime();
@@ -717,7 +725,7 @@ const startWorker = async (workerId) => {
 
             Object.keys(req.cachedFilters).forEach((key) => {
               req.cachedFilters[key].regexp = new RegExp(req.cachedFilters[key].keywords.map(([keyword, whole_word]) => {
-                let expr = keyword.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');;
+                let expr = keyword.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
                 if (whole_word) {
                   if (/^[\w]/.test(expr)) {
@@ -849,6 +857,27 @@ const startWorker = async (workerId) => {
     res.writeHead(200, { 'Content-Type': 'text/plain' });
     res.end('OK');
   });
+
+  app.get('/metrics', (req, res) => server.getConnections((err, count) => {
+    res.writeHeader(200, { 'Content-Type': 'application/openmetrics-text; version=1.0.0; charset=utf-8' });
+    res.write('# TYPE connected_clients gauge\n');
+    res.write('# HELP connected_clients The number of clients connected to the streaming server\n');
+    res.write(`connected_clients ${count}.0\n`);
+    res.write('# TYPE connected_channels gauge\n');
+    res.write('# HELP connected_channels The number of Redis channels the streaming server is subscribed to\n');
+    res.write(`connected_channels ${Object.keys(subs).length}.0\n`);
+    res.write('# TYPE pg_pool_total_connections gauge\n');
+    res.write('# HELP pg_pool_total_connections The total number of clients existing within the pool\n');
+    res.write(`pg_pool_total_connections ${pgPool.totalCount}.0\n`);
+    res.write('# TYPE pg_pool_idle_connections gauge\n');
+    res.write('# HELP pg_pool_idle_connections The number of clients which are not checked out but are currently idle in the pool\n');
+    res.write(`pg_pool_idle_connections ${pgPool.idleCount}.0\n`);
+    res.write('# TYPE pg_pool_waiting_queries gauge\n');
+    res.write('# HELP pg_pool_waiting_queries The number of queued requests waiting on a client when all clients are checked out\n');
+    res.write(`pg_pool_waiting_queries ${pgPool.waitingCount}.0\n`);
+    res.write('# EOF\n');
+    res.end();
+  }));
 
   app.use(authenticationMiddleware);
   app.use(errorMiddleware);
@@ -1188,8 +1217,15 @@ const startWorker = async (workerId) => {
     ws.on('close', onEnd);
     ws.on('error', onEnd);
 
-    ws.on('message', data => {
-      const json = parseJSON(data, session.request);
+    ws.on('message', (data, isBinary) => {
+      if (isBinary) {
+        log.warn('socket', 'Received binary data, closing connection');
+        ws.close(1003, 'The mastodon streaming server does not support binary messages');
+        return;
+      }
+      const message = data.toString('utf8');
+
+      const json = parseJSON(message, session.request);
 
       if (!json) return;
 

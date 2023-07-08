@@ -17,8 +17,8 @@ class StatusesController < ApplicationController
   skip_around_action :set_locale, if: -> { request.format == :json }
   skip_before_action :require_functional!, only: [:show, :embed], unless: :whitelist_mode?
 
-  content_security_policy only: :embed do |p|
-    p.frame_ancestors(false)
+  content_security_policy only: :embed do |policy|
+    policy.frame_ancestors(false)
   end
 
   def show
@@ -43,7 +43,7 @@ class StatusesController < ApplicationController
     return not_found if @status.hidden? || @status.reblog?
 
     expires_in 180, public: true
-    response.headers['X-Frame-Options'] = 'ALLOWALL'
+    response.headers.delete('X-Frame-Options')
 
     render layout: 'embedded'
   end

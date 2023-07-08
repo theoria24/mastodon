@@ -140,7 +140,7 @@ class LinkDetailsExtractor
   end
 
   def html
-    player_url.present? ? content_tag(:iframe, nil, src: player_url, width: width, height: height, allowtransparency: 'true', scrolling: 'no', frameborder: '0') : nil
+    player_url.present? ? content_tag(:iframe, nil, src: player_url, width: width, height: height, allowfullscreen: 'true', allowtransparency: 'true', scrolling: 'no', frameborder: '0') : nil
   end
 
   def width
@@ -248,7 +248,7 @@ class LinkDetailsExtractor
 
         structured_data
       rescue Oj::ParseError, EncodingError
-        Rails.logger.debug("Invalid JSON-LD in #{@original_url}")
+        Rails.logger.debug { "Invalid JSON-LD in #{@original_url}" }
         next
       end.first
     end
