@@ -2,7 +2,7 @@
 
 require 'rails_helper'
 
-RSpec.describe BackupService, type: :service do
+RSpec.describe BackupService do
   subject(:service_call) { described_class.new.call(backup) }
 
   let!(:user)           { Fabricate(:user) }
@@ -60,6 +60,7 @@ RSpec.describe BackupService, type: :service do
 
     aggregate_failures do
       expect(body.scan('@context').count).to eq 1
+      expect(body.scan('orderedItems').count).to eq 1
       expect(json['@context']).to_not be_nil
       expect(json['type']).to eq 'OrderedCollection'
       expect(json['totalItems']).to eq 2
