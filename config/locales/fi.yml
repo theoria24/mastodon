@@ -531,7 +531,7 @@ fi:
       moderation:
         all: Kaikki
         limited: Rajoitettu
-        title: Valvonta
+        title: Moderointi
       private_comment: Yksityinen kommentti
       public_comment: Julkinen kommentti
       purge: Tyhjennä
@@ -1298,7 +1298,7 @@ fi:
       statuses_hint_html: Tämä suodatin koskee yksittäisten julkaisujen valintaa riippumatta siitä, vastaavatko ne alla olevia avainsanoja. <a href="%{path}">Tarkista tai poista julkaisut suodattimesta</a>.
       title: Muokkaa suodatinta
     errors:
-      deprecated_api_multiple_keywords: Näitä parametreja ei voi muuttaa tästä sovelluksesta, koska ne koskevat useampaa kuin yhtä suodattimen avainsanaa. Käytä uudempaa sovellusta tai verkkokäyttöliittymää.
+      deprecated_api_multiple_keywords: Näitä parametreja ei voi muuttaa tästä sovelluksesta, koska ne koskevat useampaa kuin yhtä suodattimen avainsanaa. Käytä uudempaa sovellusta tai selainkäyttöliittymää.
       invalid_context: Ei sisältöä tai se on virheellinen
     index:
       contexts: Suodattaa kontekstissa %{contexts}
@@ -1353,7 +1353,7 @@ fi:
   imports:
     errors:
       empty: Tyhjä CSV-tiedosto
-      incompatible_type: Yhteensopimaton valitun tuontilajin kanssa
+      incompatible_type: Yhteensopimaton valitun tuontityypin kanssa
       invalid_csv_file: 'Epäkelpo CSV-tiedosto. Virhe: %{error}'
       over_rows_processing_limit: sisältää yli %{count} riviä
       too_large: Tiedosto on liian suuri
@@ -1498,7 +1498,7 @@ fi:
       other_data: Muita tietoja ei siirretä automaattisesti
       redirect: Nykyisen tilisi profiili päivitetään uudelleenohjaushuomautuksella ja suljetaan pois hauista
   moderation:
-    title: Valvonta
+    title: Moderointi
   move_handler:
     carry_blocks_over_text: Tämä käyttäjä siirtyi paikasta %{acct}, jonka olit estänyt.
     carry_mutes_over_text: Tämä käyttäjä muutti tilistä %{acct}, jonka olet mykistänyt.
