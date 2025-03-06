@@ -21,6 +21,7 @@ is:
       one: Færsla
       other: Færslur
     posts_tab_heading: Færslur
+    self_follow_error: Ekki er leyft að fylgjast með eigin aðgangi
   admin:
     account_actions:
       action: Framkvæma aðgerð
@@ -1968,4 +1969,4 @@ is:
     not_enabled: Þú hefur ennþá ekki virkjað WebAuthn
     not_supported: Þessi vafri styður ekki öryggislykla
     otp_required: Til að nota öryggislykla skaltu fyrst virkja tveggja-þátta auðkenningu.
-    registered_on: Nýskráður %{date}
+    registered_on: Skráði sig %{date}
