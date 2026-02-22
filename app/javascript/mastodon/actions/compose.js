@@ -673,8 +673,17 @@ export function selectComposeSuggestion(position, token, suggestion, path) {
 
       dispatch(useEmoji(suggestion));
     } else if (suggestion.type === 'hashtag') {
-      completion    = suggestion.name.slice(token.length - 1);
-      startPosition = position + token.length;
+      // TODO: it could make sense to keep the “most capitalized” of the two
+      const tokenName = token.slice(1); // strip leading '#'
+      const suggestionPrefix = suggestion.name.slice(0, tokenName.length);
+      const prefixMatchesSuggestion = suggestionPrefix.localeCompare(tokenName, undefined, { sensitivity: 'accent' }) === 0;
+      if (prefixMatchesSuggestion) {
+        completion = token + suggestion.name.slice(tokenName.length);
+      } else {
+        completion = `${token.slice(0, 1)}${suggestion.name}`;
+      }
+
+      startPosition = position - 1;
     } else if (suggestion.type === 'account') {
       completion    = `@${getState().getIn(['accounts', suggestion.id, 'acct'])}`;
       startPosition = position - 1;

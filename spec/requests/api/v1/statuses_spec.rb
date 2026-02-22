@@ -133,6 +133,21 @@ RSpec.describe '/api/v1/statuses' do
         expect(response).to have_http_status(200)
         expect(response.content_type)
           .to start_with('application/json')
+        expect(response.headers['Mastodon-Async-Refresh']).to be_nil
+      end
+
+      context 'with a remote status' do
+        let(:status) { Fabricate(:status, account: Fabricate(:account, domain: 'example.com'), created_at: 1.hour.ago, updated_at: 1.hour.ago) }
+
+        it 'returns http success and queues discovery of new posts' do
+          expect { get "/api/v1/statuses/#{status.id}/context", headers: headers }
+            .to enqueue_sidekiq_job(ActivityPub::FetchAllRepliesWorker)
+
+          expect(response).to have_http_status(200)
+          expect(response.content_type)
+            .to start_with('application/json')
+          expect(response.headers['Mastodon-Async-Refresh']).to match(/result_count=0/)
+        end
       end
     end
 
@@ -329,7 +344,7 @@ RSpec.describe '/api/v1/statuses' do
             .to start_with('application/json')
           expect(response.parsed_body[:quote]).to be_present
           expect(response.parsed_body[:spoiler_text]).to eq 'this is a CW'
-          expect(response.parsed_body[:content]).to eq ''
+          expect(response.parsed_body[:content]).to match(/RE: /)
           expect(response.headers['X-RateLimit-Limit']).to eq RateLimiter::FAMILIES[:statuses][:limit].to_s
           expect(response.headers['X-RateLimit-Remaining']).to eq (RateLimiter::FAMILIES[:statuses][:limit] - 1).to_s
         end
@@ -491,6 +506,15 @@ RSpec.describe '/api/v1/statuses' do
           expect(response).to have_http_status(200)
           expect(response.content_type)
             .to start_with('application/json')
+        end
+      end
+
+      context 'when status has non-default quote policy and param is omitted' do
+        let(:status) { Fabricate(:status, account: user.account, quote_approval_policy: 'nobody') }
+
+        it 'preserves existing quote approval policy' do
+          expect { subject }
+            .to_not(change { status.reload.quote_approval_policy })
         end
       end
     end
